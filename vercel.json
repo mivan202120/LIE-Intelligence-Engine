@@ -1,0 +1,29 @@
+{
+    "crons": [
+        {
+            "path": "/api/cron/collect-news",
+            "schedule": "0 8,20 * * *"
+        },
+        {
+            "path": "/api/cron/collect-linkedin",
+            "schedule": "5 8,20 * * *"
+        },
+        {
+            "path": "/api/cron/process-intelligence",
+            "schedule": "15 8,20 * * *"
+        },
+        {
+            "path": "/api/cron/deliver-briefing",
+            "schedule": "25 8,20 * * *"
+        },
+        {
+            "path": "/api/cron/generate-content",
+            "schedule": "0 11 * * *"
+        }
+    ],
+    "functions": {
+        "app/api/**/*.ts": {
+            "maxDuration": 300
+        }
+    }
+}
