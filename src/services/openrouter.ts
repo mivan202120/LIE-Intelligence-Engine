@@ -163,7 +163,8 @@ export async function generateImage(
 ): Promise<ImageResult> {
     const imagePrompt = "Generate an editorial-quality image for a LinkedIn post. " +
         "Style: professional, modern, tech-forward. " +
-        "Do NOT include any text in the image. " + prompt;
+        "Do NOT include any text in the image. " +
+        "Return ONLY the image, no text description. " + prompt;
 
     try {
         const response = await openrouter.chat.completions.create({
@@ -172,9 +173,11 @@ export async function generateImage(
         });
 
         const content = response.choices[0]?.message?.content ?? "";
-        // Gemini/GPT-5 image models may return content with inline image data
-        // or a URL. Extract whatever is usable.
         const imageUrl = extractImageUrl(content);
+
+        if (!imageUrl) {
+            throw new Error("Primary model returned no valid image URL");
+        }
 
         return {
             imageUrl,
@@ -204,16 +207,20 @@ function extractImageUrl(content: string): string {
     const mdMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
     if (mdMatch) return mdMatch[1];
 
-    // Check for direct URL
-    const urlMatch = content.match(/(https?:\/\/[^\s"'<>]+\.(png|jpg|jpeg|webp|gif))/i);
+    // Check for direct URL (must end in image extension)
+    const urlMatch = content.match(/(https?:\/\/[^\s"'<>]+\.(png|jpg|jpeg|webp|gif)[^\s"'<>]*)/i);
     if (urlMatch) return urlMatch[1];
+
+    // Check for any https URL (OpenRouter image hosting)
+    const anyUrlMatch = content.match(/(https?:\/\/[^\s"'<>]{20,})/i);
+    if (anyUrlMatch) return anyUrlMatch[1];
 
     // Check for data URI
     const dataMatch = content.match(/(data:image\/[^;]+;base64,[^\s"']+)/);
     if (dataMatch) return dataMatch[1];
 
-    // Return raw content as last resort (could be a URL)
-    return content.trim();
+    // No valid image found — return empty string (NOT the text content)
+    return "";
 }
 
 // ─── Cosine Similarity ─────────────────────────────────────────────
