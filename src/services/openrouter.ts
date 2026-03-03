@@ -157,86 +157,63 @@ export async function embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
     }));
 }
 
-// ─── Image Generation (Together AI — FLUX) ──────────────────────────
+// ─── Image Generation (Google Imagen 3) ─────────────────────────────
 export async function generateImage(
     prompt: string
 ): Promise<ImageResult> {
     const imagePrompt = "Professional editorial image for LinkedIn. " +
-        "Style: modern, clean, abstract-tech. Dark blue/purple palette. " +
+        "Style: modern, clean, abstract-tech. Dark blue and purple palette. " +
         "NO text, NO words, NO letters, NO human faces. " +
         "Abstract data visualization aesthetic. " + prompt;
 
-    // Try Together AI FLUX first 
-    const togetherKey = process.env.TOGETHER_API_KEY;
-    if (togetherKey) {
-        try {
-            const response = await fetch("https://api.together.xyz/v1/images/generations", {
-                method: "POST",
-                headers: {
-                    "Authorization": "Bearer " + togetherKey,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    model: "black-forest-labs/FLUX.1.1-pro",
-                    prompt: imagePrompt,
-                    width: 1024,
-                    height: 1024,
-                    n: 1,
-                    response_format: "url",
-                }),
-            });
-
-            if (response.ok) {
-                const data = await response.json() as {
-                    data: { url?: string; b64_json?: string }[];
-                };
-                const imageUrl = data.data?.[0]?.url;
-                if (imageUrl) {
-                    return { imageUrl, model: "together/flux-1.1-pro" };
-                }
-                // If URL not available, try base64
-                const b64 = data.data?.[0]?.b64_json;
-                if (b64) {
-                    return { imageUrl: "data:image/png;base64," + b64, model: "together/flux-1.1-pro" };
-                }
-            }
-            console.warn("[Image] Together AI FLUX response not ok:", response.status);
-        } catch (err) {
-            console.warn("[Image] Together AI FLUX failed:", err);
-        }
+    const googleKey = process.env.GOOGLE_AI_KEY;
+    if (!googleKey) {
+        console.warn("[Image] No GOOGLE_AI_KEY configured");
+        return { imageUrl: "", model: "none" };
     }
 
-    // Fallback: OpenAI DALL-E 3 via OpenRouter
     try {
-        const response = await fetch("https://openrouter.ai/api/v1/images/generations", {
-            method: "POST",
-            headers: {
-                "Authorization": "Bearer " + process.env.OPENROUTER_API_KEY,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                model: "openai/dall-e-3",
-                prompt: imagePrompt,
-                n: 1,
-                size: "1024x1024",
-            }),
-        });
-
-        if (response.ok) {
-            const data = await response.json() as {
-                data: { url?: string; b64_json?: string }[];
-            };
-            const imageUrl = data.data?.[0]?.url;
-            if (imageUrl) {
-                return { imageUrl, model: "openai/dall-e-3" };
+        const response = await fetch(
+            "https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=" + googleKey,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    instances: [{ prompt: imagePrompt }],
+                    parameters: {
+                        sampleCount: 1,
+                        aspectRatio: "1:1",
+                        safetyFilterLevel: "BLOCK_MEDIUM_AND_ABOVE",
+                    },
+                }),
             }
-        }
-        console.warn("[Image] DALL-E 3 via OpenRouter failed:", response.status);
-    } catch (err) {
-        console.warn("[Image] DALL-E 3 fallback failed:", err);
-    }
+        );
 
-    return { imageUrl: "", model: "none" };
+        if (!response.ok) {
+            const errText = await response.text();
+            console.warn("[Image] Imagen 3 API error:", response.status, errText);
+            return { imageUrl: "", model: "none" };
+        }
+
+        const data = await response.json() as {
+            predictions?: { bytesBase64Encoded: string; mimeType: string }[];
+        };
+
+        const prediction = data.predictions?.[0];
+        if (prediction?.bytesBase64Encoded) {
+            const mimeType = prediction.mimeType || "image/png";
+            return {
+                imageUrl: "base64:" + mimeType + ":" + prediction.bytesBase64Encoded,
+                model: "google/imagen-3",
+            };
+        }
+
+        console.warn("[Image] Imagen 3 returned no predictions");
+        return { imageUrl: "", model: "none" };
+    } catch (err) {
+        console.warn("[Image] Imagen 3 failed:", err);
+        return { imageUrl: "", model: "none" };
+    }
 }
 
 // ─── Cosine Similarity ─────────────────────────────────────────────

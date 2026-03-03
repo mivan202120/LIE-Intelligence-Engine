@@ -170,15 +170,19 @@ export async function GET(request: Request) {
 
     // 7. Send to Discord #daily-publication with approval buttons
     try {
+        // Don't pass base64 data as imageUrl to the embed builder
+        const displayImageUrl = imageUrl && !imageUrl.startsWith("base64:") ? imageUrl : undefined;
         const { embed, buttons } = createPublicationEmbed({
             id: publicationId,
             title: content.title,
             content: content.content,
             format: content.format || selectedFormat,
-            imageUrl,
+            imageUrl: displayImageUrl,
             hookVariants: content.hookVariants,
         });
-        await sendEmbed(CHANNELS.CONTENT, embed, [buttons]);
+        // Pass base64 image data for attachment upload
+        const imageData = imageUrl && imageUrl.startsWith("base64:") ? imageUrl : undefined;
+        await sendEmbed(CHANNELS.CONTENT, embed, [buttons], imageData);
     } catch (e) {
         errors.push("discord_publication: " + (e instanceof Error ? e.message : String(e)));
     }

@@ -8,6 +8,13 @@ import { ButtonStyle } from "discord-api-types/v10";
 import type { APIActionRowComponent, APIButtonComponent } from "discord-api-types/v10";
 
 // ─── Webhook Execution (raw fetch, no gateway) ─────────────────────
+function getWebhookUrl(channel: string): string {
+    const envKey = `DISCORD_WEBHOOK_${channel.toUpperCase()}`;
+    const url = process.env[envKey];
+    if (!url) throw new Error(`Missing env var: ${envKey}`);
+    return url;
+}
+
 async function executeWebhook(
     channel: string,
     payload: {
@@ -16,9 +23,7 @@ async function executeWebhook(
         components?: APIActionRowComponent<APIButtonComponent>[];
     }
 ) {
-    const envKey = `DISCORD_WEBHOOK_${channel.toUpperCase()}`;
-    const url = process.env[envKey];
-    if (!url) throw new Error(`Missing env var: ${envKey}`);
+    const url = getWebhookUrl(channel);
 
     const res = await fetch(`${url}?wait=true`, {
         method: "POST",
@@ -29,6 +34,45 @@ async function executeWebhook(
     if (!res.ok) {
         const errorText = await res.text();
         throw new Error(`Discord webhook failed (${res.status}): ${errorText}`);
+    }
+
+    return res.json();
+}
+
+// ─── Webhook with Image Attachment ──────────────────────────────────
+async function executeWebhookWithImage(
+    channel: string,
+    imageBase64: string,
+    mimeType: string,
+    payload: {
+        embeds?: ReturnType<EmbedBuilder["toJSON"]>[];
+        components?: APIActionRowComponent<APIButtonComponent>[];
+    }
+) {
+    const url = getWebhookUrl(channel);
+    const ext = mimeType.includes("png") ? "png" : "jpg";
+    const filename = `publication.${ext}`;
+
+    // Convert base64 to binary
+    const binaryString = atob(imageBase64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: mimeType });
+
+    const formData = new FormData();
+    formData.append("file", blob, filename);
+    formData.append("payload_json", JSON.stringify(payload));
+
+    const res = await fetch(`${url}?wait=true`, {
+        method: "POST",
+        body: formData,
+    });
+
+    if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Discord webhook with image failed (${res.status}): ${errorText}`);
     }
 
     return res.json();
@@ -51,14 +95,31 @@ type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
 export async function sendEmbed(
     channel: ChannelName,
     embed: EmbedBuilder,
-    components?: ActionRowBuilder<ButtonBuilder>[]
+    components?: ActionRowBuilder<ButtonBuilder>[],
+    imageData?: string // "base64:mimeType:data" format from generateImage
 ) {
-    await executeWebhook(channel, {
+    const payload = {
         embeds: [embed.toJSON()],
         ...(components && {
             components: components.map((c) => c.toJSON() as APIActionRowComponent<APIButtonComponent>),
         }),
-    });
+    };
+
+    // If we have base64 image data, upload as attachment
+    if (imageData && imageData.startsWith("base64:")) {
+        const parts = imageData.split(":");
+        const mimeType = parts[1];
+        const base64 = parts.slice(2).join(":"); // rejoin in case of colons in base64
+
+        // Set embed image to reference the attachment
+        const embedJson = payload.embeds[0];
+        const ext = mimeType.includes("png") ? "png" : "jpg";
+        embedJson.image = { url: `attachment://publication.${ext}` };
+
+        await executeWebhookWithImage(channel, base64, mimeType, payload);
+    } else {
+        await executeWebhook(channel, payload);
+    }
 }
 
 // ─── Send Simple Message ────────────────────────────────────────────
