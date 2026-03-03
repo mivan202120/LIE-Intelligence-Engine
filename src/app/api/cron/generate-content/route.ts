@@ -159,30 +159,39 @@ Respond in JSON: {"topic": "<selected topic>", "format": "<format>", "reasoning"
 
         const duration = Date.now() - startTime;
 
-        await db.insert(pipelineRuns).values({
-            cycleId,
-            phase: "generate-content",
-            status: "success",
-            itemsProcessed: 1,
-            tokensUsed:
-                topicSelection.tokensUsed.input +
-                topicSelection.tokensUsed.output +
-                contentResult.tokensUsed.input +
-                contentResult.tokensUsed.output,
-            duration,
-            startedAt: new Date(startTime),
-            completedAt: new Date(),
-        });
+        // Log success (non-blocking — errors here should NOT mask the success)
+        try {
+            await db.insert(pipelineRuns).values({
+                cycleId,
+                phase: "generate-content",
+                status: "success",
+                itemsProcessed: 1,
+                tokensUsed:
+                    topicSelection.tokensUsed.input +
+                    topicSelection.tokensUsed.output +
+                    contentResult.tokensUsed.input +
+                    contentResult.tokensUsed.output,
+                duration,
+                startedAt: new Date(startTime),
+                completedAt: new Date(),
+            });
+        } catch (logErr) {
+            console.warn("[Content] Failed to log pipeline run:", logErr);
+        }
 
-        await sendEmbed(
-            CHANNELS.LOGS,
-            createLogEmbed(
-                "generate-content",
-                "success",
-                `Publicación generada: **${content.title}**\nFormato: ${content.format}\nTema: ${selectedTopic}\n${imageUrl ? "✅ Imagen generada" : "⚠️ Sin imagen"}`,
-                duration
-            )
-        );
+        try {
+            await sendEmbed(
+                CHANNELS.LOGS,
+                createLogEmbed(
+                    "generate-content",
+                    "success",
+                    "Publicación generada: " + content.title + "\nFormato: " + (content.format || selectedFormat) + "\nTema: " + selectedTopic + "\n" + (imageUrl ? "Con imagen" : "Sin imagen"),
+                    duration
+                )
+            );
+        } catch (logErr) {
+            console.warn("[Content] Failed to send Discord log:", logErr);
+        }
 
         return NextResponse.json({
             success: true,
