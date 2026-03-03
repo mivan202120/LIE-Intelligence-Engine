@@ -53,13 +53,9 @@ async function executeWebhookWithImage(
     const ext = mimeType.includes("png") ? "png" : "jpg";
     const filename = `publication.${ext}`;
 
-    // Convert base64 to binary
-    const binaryString = atob(imageBase64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-    }
-    const blob = new Blob([bytes], { type: mimeType });
+    // Convert base64 to binary using Node.js Buffer
+    const buffer = Buffer.from(imageBase64, "base64");
+    const blob = new Blob([buffer], { type: mimeType });
 
     const formData = new FormData();
     formData.append("file", blob, filename);
