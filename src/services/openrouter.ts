@@ -157,70 +157,86 @@ export async function embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
     }));
 }
 
-// ─── Image Generation ───────────────────────────────────────────────
+// ─── Image Generation (Together AI — FLUX) ──────────────────────────
 export async function generateImage(
     prompt: string
 ): Promise<ImageResult> {
-    const imagePrompt = "Generate an editorial-quality image for a LinkedIn post. " +
-        "Style: professional, modern, tech-forward. " +
-        "Do NOT include any text in the image. " +
-        "Return ONLY the image, no text description. " + prompt;
+    const imagePrompt = "Professional editorial image for LinkedIn. " +
+        "Style: modern, clean, abstract-tech. Dark blue/purple palette. " +
+        "NO text, NO words, NO letters, NO human faces. " +
+        "Abstract data visualization aesthetic. " + prompt;
 
-    try {
-        const response = await openrouter.chat.completions.create({
-            model: MODELS.image.primary,
-            messages: [{ role: "user", content: imagePrompt }],
-        });
+    // Try Together AI FLUX first 
+    const togetherKey = process.env.TOGETHER_API_KEY;
+    if (togetherKey) {
+        try {
+            const response = await fetch("https://api.together.xyz/v1/images/generations", {
+                method: "POST",
+                headers: {
+                    "Authorization": "Bearer " + togetherKey,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    model: "black-forest-labs/FLUX.1.1-pro",
+                    prompt: imagePrompt,
+                    width: 1024,
+                    height: 1024,
+                    n: 1,
+                    response_format: "url",
+                }),
+            });
 
-        const content = response.choices[0]?.message?.content ?? "";
-        const imageUrl = extractImageUrl(content);
-
-        if (!imageUrl) {
-            throw new Error("Primary model returned no valid image URL");
+            if (response.ok) {
+                const data = await response.json() as {
+                    data: { url?: string; b64_json?: string }[];
+                };
+                const imageUrl = data.data?.[0]?.url;
+                if (imageUrl) {
+                    return { imageUrl, model: "together/flux-1.1-pro" };
+                }
+                // If URL not available, try base64
+                const b64 = data.data?.[0]?.b64_json;
+                if (b64) {
+                    return { imageUrl: "data:image/png;base64," + b64, model: "together/flux-1.1-pro" };
+                }
+            }
+            console.warn("[Image] Together AI FLUX response not ok:", response.status);
+        } catch (err) {
+            console.warn("[Image] Together AI FLUX failed:", err);
         }
+    }
 
-        return {
-            imageUrl,
-            model: response.model ?? MODELS.image.primary,
-        };
-    } catch (error) {
-        console.warn(
-            "[OpenRouter] Image gen primary failed, trying fallback:",
-            error
-        );
-
-        const response = await openrouter.chat.completions.create({
-            model: MODELS.image.fallback,
-            messages: [{ role: "user", content: imagePrompt }],
+    // Fallback: OpenAI DALL-E 3 via OpenRouter
+    try {
+        const response = await fetch("https://openrouter.ai/api/v1/images/generations", {
+            method: "POST",
+            headers: {
+                "Authorization": "Bearer " + process.env.OPENROUTER_API_KEY,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                model: "openai/dall-e-3",
+                prompt: imagePrompt,
+                n: 1,
+                size: "1024x1024",
+            }),
         });
 
-        const content = response.choices[0]?.message?.content ?? "";
-        return {
-            imageUrl: extractImageUrl(content),
-            model: response.model ?? MODELS.image.fallback,
-        };
+        if (response.ok) {
+            const data = await response.json() as {
+                data: { url?: string; b64_json?: string }[];
+            };
+            const imageUrl = data.data?.[0]?.url;
+            if (imageUrl) {
+                return { imageUrl, model: "openai/dall-e-3" };
+            }
+        }
+        console.warn("[Image] DALL-E 3 via OpenRouter failed:", response.status);
+    } catch (err) {
+        console.warn("[Image] DALL-E 3 fallback failed:", err);
     }
-}
 
-function extractImageUrl(content: string): string {
-    // Check for markdown image syntax ![...](url)
-    const mdMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
-    if (mdMatch) return mdMatch[1];
-
-    // Check for direct URL (must end in image extension)
-    const urlMatch = content.match(/(https?:\/\/[^\s"'<>]+\.(png|jpg|jpeg|webp|gif)[^\s"'<>]*)/i);
-    if (urlMatch) return urlMatch[1];
-
-    // Check for any https URL (OpenRouter image hosting)
-    const anyUrlMatch = content.match(/(https?:\/\/[^\s"'<>]{20,})/i);
-    if (anyUrlMatch) return anyUrlMatch[1];
-
-    // Check for data URI
-    const dataMatch = content.match(/(data:image\/[^;]+;base64,[^\s"']+)/);
-    if (dataMatch) return dataMatch[1];
-
-    // No valid image found — return empty string (NOT the text content)
-    return "";
+    return { imageUrl: "", model: "none" };
 }
 
 // ─── Cosine Similarity ─────────────────────────────────────────────
