@@ -18,8 +18,8 @@ export const MODELS = {
     },
     // 🎨 Image — editorial image generation
     image: {
-        primary: "black-forest-labs/flux-2-klein",
-        fallback: "black-forest-labs/flux-schnell",
+        primary: "google/gemini-2.5-flash-image",
+        fallback: "openai/gpt-5-image-mini",
     },
 } as const;
 
@@ -161,35 +161,59 @@ export async function embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
 export async function generateImage(
     prompt: string
 ): Promise<ImageResult> {
+    const imagePrompt = "Generate an editorial-quality image for a LinkedIn post. " +
+        "Style: professional, modern, tech-forward. " +
+        "Do NOT include any text in the image. " + prompt;
+
     try {
         const response = await openrouter.chat.completions.create({
             model: MODELS.image.primary,
-            messages: [{ role: "user", content: prompt }],
+            messages: [{ role: "user", content: imagePrompt }],
         });
 
-        // FLUX models return image URLs in the response
         const content = response.choices[0]?.message?.content ?? "";
+        // Gemini/GPT-5 image models may return content with inline image data
+        // or a URL. Extract whatever is usable.
+        const imageUrl = extractImageUrl(content);
 
         return {
-            imageUrl: content,
+            imageUrl,
             model: response.model ?? MODELS.image.primary,
         };
     } catch (error) {
         console.warn(
-            `[OpenRouter] Image generation with ${MODELS.image.primary} failed, trying fallback`,
+            "[OpenRouter] Image gen primary failed, trying fallback:",
             error
         );
 
         const response = await openrouter.chat.completions.create({
             model: MODELS.image.fallback,
-            messages: [{ role: "user", content: prompt }],
+            messages: [{ role: "user", content: imagePrompt }],
         });
 
+        const content = response.choices[0]?.message?.content ?? "";
         return {
-            imageUrl: response.choices[0]?.message?.content ?? "",
+            imageUrl: extractImageUrl(content),
             model: response.model ?? MODELS.image.fallback,
         };
     }
+}
+
+function extractImageUrl(content: string): string {
+    // Check for markdown image syntax ![...](url)
+    const mdMatch = content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
+    if (mdMatch) return mdMatch[1];
+
+    // Check for direct URL
+    const urlMatch = content.match(/(https?:\/\/[^\s"'<>]+\.(png|jpg|jpeg|webp|gif))/i);
+    if (urlMatch) return urlMatch[1];
+
+    // Check for data URI
+    const dataMatch = content.match(/(data:image\/[^;]+;base64,[^\s"']+)/);
+    if (dataMatch) return dataMatch[1];
+
+    // Return raw content as last resort (could be a URL)
+    return content.trim();
 }
 
 // ─── Cosine Similarity ─────────────────────────────────────────────
