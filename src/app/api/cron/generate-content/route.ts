@@ -29,12 +29,16 @@ export async function GET(request: Request) {
     const startTime = Date.now();
 
     try {
-        await db.insert(pipelineRuns).values({
-            cycleId,
-            phase: "generate-content",
-            status: "running",
-            startedAt: new Date(),
-        });
+        try {
+            await db.insert(pipelineRuns).values({
+                cycleId,
+                phase: "generate-content",
+                status: "running",
+                startedAt: new Date(),
+            });
+        } catch (logErr) {
+            console.warn("[Content] Failed to log pipeline start:", logErr);
+        }
 
         // 1. Gather last 24h of intelligence
         const recentNews = await db
